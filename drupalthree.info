@@ -1,0 +1,8 @@
+name = drupalthree
+description = Drupal + three
+core = 7.x
+package = drupalthree 
+php = 5.3
+dependencies[] = libraries
+dependencies[] = jquery_update
+

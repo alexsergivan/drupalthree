@@ -1,0 +1,450 @@
+<?php
+
+/**
+ * @file
+ * drupalthree.module.
+ */
+define('DRUPALTHREE_FOLDER', 'public://threejs_objects/');
+
+/**
+ * Implements hook_libraries_info().
+ */
+function drupalthree_libraries_info() {
+  $libraries = array();
+  $libraries['threejs'] = array(
+    'name' => 'Three.js',
+    'vendor url' => 'http://threejs.org/',
+    'download url' => 'http://github.com/mrdoob/three.js/zipball/master',
+    'files' => array(
+      'js' => array(
+        'three.min.js',
+      ),
+    ),
+    'version callback' => 'drupalthree_version',
+  );
+
+  return $libraries;
+}
+
+/**
+ * Short-circuit the version argument.
+ * 
+ * @return boolean
+ */
+function drupalthree_version() {
+  return TRUE;
+}
+
+/**
+ * Implements hook_theme().
+ */
+function drupalthree_theme($existing, $type, $theme, $path) {
+  $items = array();
+  $items['drupalthree_container'] = array(
+    'variables' => array(
+      'vars' => NULL,
+    ),
+    'template' => 'drupalthree_container',
+  );
+  $items['drupalthree_field_widget'] = array(
+    'render element' => 'element',
+  );
+
+  return $items;
+}
+
+/**
+ * Theme function for drupalthree_field_widget.
+ */
+function theme_drupalthree_field_widget($variables) {
+  $element = $variables['element'];
+
+  $attributes = array();
+  if (isset($element['#id'])) {
+    $attributes['id'] = $element['#id'];
+  }
+  if (!empty($element['#attributes']['class'])) {
+    $attributes['class'] = (array) $element['#attributes']['class'];
+  }
+  $attributes['class'][] = 'form-managed-file';
+  
+  if (isset($element['#file']->fid)) {
+    $files = _drupalthree_get_model_files($element['#file']->fid); 
+  }
+  $output = '';
+  $output .= '<div' . drupal_attributes($attributes) . '>';
+  $output .= drupal_render_children($element);
+  $output .= '</div>';
+  if (isset($files) && is_array($files)){
+    $output .= '<div class="model_files">';
+    $header = array(t('Model files'));
+    foreach ($files as $file) {
+      $rows[] = array($file);
+    }
+    $output .= theme('table', array('header' => $header, 'rows' => $rows));
+    $output .= '</div>';
+  }
+  
+  return $output;  
+}
+
+/**
+ * Rendering 3d object.
+ * 
+ * @param array $config
+ *   example: array(
+ *    'container_id' => 'drupalthree_container',
+ *    'width' => 500,
+ *    'height' => 400,
+ *    'obj_path' => drupal_get_path('module', 'drupalthree') . '/object/basic_camera.obj',
+ *    'mtl_path' => drupal_get_path('module', 'drupalthree') . '/object/basic_camera.mtl',
+ *   ).
+ * @param mixed $three_content
+ */
+function drupalthree_render_3d($config, $three_content = NULL) {
+  $vars = array(
+    'three_content' => $three_content,
+    'config' => $config,
+  );
+
+  return theme('drupalthree_container', array('vars' => $vars));
+}
+
+/**
+ * Preprocess function for drupalthree_container theme.
+ */
+function drupalthree_preprocess_drupalthree_container(&$vars) {
+  $vars_arr = $vars['vars'];
+  $config = $vars_arr['config'];
+  $model_files = _drupalthree_get_model_files($config['model_fid']);
+
+  libraries_load('threejs');
+  drupal_add_js(drupal_get_path('module', 'drupalthree') . '/js/controls/OrbitControls.js');
+  if ($model_files) {
+    drupalthree_add_loaders($model_files);
+  }
+  drupal_add_js(drupal_get_path('module', 'drupalthree') . '/js/Detector.js');
+  drupalthree_set_config($config);
+  drupal_add_js(drupal_get_path('module', 'drupalthree') . '/js/drupalthree.js');
+}
+
+/**
+ * Set all three.js config.
+ * 
+ * @param array $config
+ */
+function drupalthree_set_config(array $config) {
+  drupal_add_js(array('drupalthree' => array('config' => $config)), 'setting');
+}
+
+/**
+ * Implements hook_field_info().
+ */
+function drupalthree_field_info() {
+  return array(
+    'drupalthree' => array(
+      'label' => t('Three.js field'),
+      'description' => t('Three.js object field.'),
+      'default_widget' => 'drupalthree_field_widget',
+      'default_formatter' => 'drupalthree_field_formatter',
+    ),
+  );
+}
+
+/**
+ * Implements hook_field_validate().
+ */
+function drupalthree_field_validate($entity_type, $entity, $field, $instance, $langcode, $items, &$errors) {
+  
+}
+
+/**
+ * Implements hook_field_is_empty().
+ */
+function drupalthree_field_is_empty($item, $field) {
+  $is_empty = FALSE;
+  if (empty($item['upload_threejs_archive'])) {
+    $is_empty = TRUE;
+  }
+  return $is_empty;
+}
+
+/**
+ * Implements hook_field_formatter_info().
+ */
+function drupalthree_field_formatter_info() {
+  return array(
+    'drupalthree_field_formatter' => array(
+      'label' => t('Drupal Three.js formatter'),
+      'field types' => array('drupalthree'),
+    ),
+  );
+}
+
+/**
+ * Implements hook_field_formatter_view().
+ */
+function drupalthree_field_formatter_view($entity_type, $entity, $field, $instance, $langcode, $items, $display) {
+  $element = array();
+  switch ($display['type']) {
+    case 'drupalthree_field_formatter':
+      foreach ($items as $delta => $elem) {
+        $model_fid = isset($elem['upload_threejs_archive']) ? $elem['upload_threejs_archive'] : FALSE;
+        $data = isset($elem['drupalthree_data']) ? $elem['drupalthree_data'] : '';
+
+        if ($model_fid) {
+
+          $model_obj = file_load($model_fid);
+          $model_path = file_create_url($model_obj->uri);
+
+
+          $config = array(
+            'container_id' => 'drupalthree_container_' . $entity->nid,
+            'width' => 1000,
+            'height' => 800,
+            'loaders' => _drupalthree_get_loaders_files($model_fid),
+            'obj_path' => $model_obj,
+            'mtl_path' => $model_path,
+            'model_fid' => $model_fid,
+          );
+
+          $html = drupalthree_render_3d($config);
+        }
+        else {
+          $html = t('There are no .obj or .mtl files.');
+        }
+
+        $element[$delta]['#markup'] = $html;
+      }
+      break;
+  }
+  return $element;
+}
+
+/**
+ * Implements hook_field_widget_info().
+ */
+function drupalthree_field_widget_info() {
+  return array(
+    'drupalthree_field_widget' => array(
+      'label' => t('Drupalthree widget'),
+      'field types' => array('drupalthree'),
+    ),
+  );
+}
+
+/**
+ * Implements hook_field_widget_form().
+ */
+function drupalthree_field_widget_form(&$form, &$form_state, $field, $instance, $langcode, $items, $delta, $element) {
+  $parents = $form['#parents'];
+  $field_name = $field['field_name'];
+  $item = & $items[$delta];
+  $field_state = field_form_get_state($parents, $field_name, $langcode, $form_state);
+  $element_info = element_info('managed_file');
+  switch ($instance['widget']['type']) {
+    case 'drupalthree_field_widget':
+      $element['upload_threejs_archive'] = array(
+        '#type' => 'managed_file',
+        '#progress_indicator' => 'bar',
+        '#title' => t('Upload model archive'),
+        '#default_value' => isset($item['upload_threejs_archive']) ? $item['upload_threejs_archive'] : 0,
+        '#upload_location' => DRUPALTHREE_FOLDER,
+        '#upload_validators' => array(
+          'file_validate_extensions' => array('zip'),
+        ),
+        '#theme' => 'drupalthree_field_widget',
+        '#process' => array_merge($element_info['#process'], array('drupalthree_field_custom_process')),
+      );
+
+      $element['drupalthree_data'] = array(
+        '#type' => 'hidden',
+        '#attributes' => array('class' => array('drupalthree_data_' . $delta)),
+        '#value' => '',
+        '#default_value' => '',
+      );
+
+      break;
+  }
+  return $element;
+}
+
+/**
+ * Make the file permanent.
+ */
+function drupalthree_field_custom_process($element, &$form_state, $form) {  
+  if (isset($element['filename'])) {
+    global $user;
+    $file = file_load($element['#value']['fid']);
+    $file->status = FILE_STATUS_PERMANENT;
+    file_usage_add($file, 'drupalthree', $user->name, $user->uid);
+    file_save($file);
+    $f_path = drupal_realpath($file->uri);
+    $directory = _drupalthree_extract_model_directory($file->fid);
+    drupalthree_archive_extract($f_path, $directory);
+    // Need to cover situation when node is not saved, but model is deleting.
+    $_SESSION['new_fid'] = $file->fid;
+  }
+  else {
+    if (isset($element['#default_value']) || isset($_SESSION['new_fid'])) {
+      $fid = $_SESSION['new_fid'] ? $_SESSION['new_fid'] : $element['#default_value'];
+      file_unmanaged_delete_recursive(DRUPALTHREE_FOLDER . $fid);
+      unset($_SESSION['new_fid']);
+    }
+  }
+  return $element;
+}
+
+/**
+ * Get directory for models uploading.
+ * 
+ * @param int $archive_fid
+ * 
+ * @return string
+ */
+function _drupalthree_extract_model_directory($archive_fid) {
+  $directory = &drupal_static(__FUNCTION__, '');
+  if (empty($directory)) {
+    $directory = DRUPALTHREE_FOLDER . $archive_fid . '/';
+    if (!file_exists($directory)) {
+      mkdir($directory);
+    }
+  }
+  return $directory;
+}
+
+/**
+ * Unpacks a downloaded archive file.
+ *
+ * @param string $file
+ *   The filename of the archive you wish to extract.
+ * @param string $directory
+ *   The directory you wish to extract the archive into.
+ *
+ * @return Archiver
+ *   The Archiver object used to extract the archive.
+ *
+ * @throws Exception
+ */
+function drupalthree_archive_extract($file, $directory) {
+  $archiver = archiver_get_archiver($file);
+  if (!$archiver) {
+    throw new Exception(t('Cannot extract %file, not a valid archive.', array('%file' => $file)));
+  }
+
+  // Remove the directory if it exists, otherwise it might contain a mixture of
+  // old files mixed with the new files (e.g. in cases where files were removed
+  // from a later release).
+  $files = $archiver->listContents();
+
+  $model = strtok($files[0], '/\\');
+
+  $extract_location = $directory . '/' . $model;
+  if (file_exists($extract_location)) {
+    file_unmanaged_delete_recursive($extract_location);
+  }
+
+  $archiver->extract($directory);
+  return $files;
+}
+
+/**
+ * Get all model files.
+ */
+function _drupalthree_get_model_files($archive_fid) {
+  $files = file_scan_directory(DRUPALTHREE_FOLDER . $archive_fid, '/\./');
+  $formated_files = array();
+  if (!empty($files)) {
+    foreach ($files as $uri => $file) {
+      $formated_files[$uri] = $file->filename;
+    }
+  }
+  return $formated_files;
+}
+
+/**
+ * Get array of known extensions.
+ * 
+ * @param array $model_files
+ *   Model files array. uri => filename.
+ * 
+ * @return array
+ */
+function _drupalthree_detect_loader_extensions($model_files) {
+  if (empty($model_files)) {
+    return;
+  }
+  // Array for store loader extensions.
+  $extensions = array();
+  foreach ($model_files as $uri => $filename) {
+    $info = new SplFileInfo($filename);
+    $ext = $info->getExtension();
+    switch ($ext) {
+      case 'mtl':
+      case 'obj':
+      case 'json':
+        $extensions[$uri] = $ext;
+        break;
+      case 'dae':
+        $extensions[$uri] = 'Collada';
+        break;
+    }
+  }
+
+  return $extensions;
+}
+
+/**
+ * Add loaders js.
+ * 
+ * @param array $model_files
+ */
+function drupalthree_add_loaders($model_files) {
+  $extensions = _drupalthree_detect_loader_extensions($model_files);
+  drupal_add_js(drupal_get_path('module', 'drupalthree') . '/js/loaders/DDSLoader.js');
+  foreach ($extensions as $ext) {
+    // Don't need to add loader for json.
+    if ($ext == 'json') {
+      continue;
+    }
+    if ($ext == 'Collada') {
+      $ext_name = $ext;
+    }
+    else {
+      $ext_name = strtoupper($ext);
+    }
+    $loader_name = $ext_name . 'Loader.js';
+    drupal_add_js(drupal_get_path('module', 'drupalthree') . '/js/loaders/' . $loader_name);
+  }
+  if (in_array('mtl', $extensions) && in_array('obj', $extensions)) {
+    drupal_add_js(drupal_get_path('module', 'drupalthree') . '/js/loaders/OBJMTLLoader.js');
+  }
+}
+
+/**
+ * Get loader name and loaders files for js.
+ * 
+ * @param int $archive_fid
+ * @return array
+ */
+function _drupalthree_get_loaders_files($archive_fid) {
+  $model_files = _drupalthree_get_model_files($archive_fid);
+  // Array for store loader extensions.
+  $extensions = _drupalthree_detect_loader_extensions($model_files);
+  $loader_data = array();
+  if (in_array('mtl', $extensions) && in_array('obj', $extensions)) {
+    $loader_data['loader']['name'] = 'OBJMTLLoader';
+  }
+  if (in_array('Collada', $extensions) && in_array('json', $extensions)) {
+    $loader_data['loader']['name'] = 'ColladaLoader';
+  }
+  foreach ($extensions as $uri => $ext) {
+    $ext_name = strtoupper($ext);
+    if (empty($loader_data['loader']['name'])) {
+      $loader_data['loader']['name'] = $ext_name . 'Loader';
+    }
+    $loader_data['loader']['items'][$ext] = file_create_url($uri);
+  }
+
+  return $loader_data;
+}

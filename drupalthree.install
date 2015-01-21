@@ -1,0 +1,15 @@
+<?php
+/**
+ * Implements hook_field_schema().
+ */
+function drupalthree_field_schema($field) {
+  $columns = array(
+    'upload_threejs_archive' => array('type' => 'int', 'not null' => FALSE),
+    'drupalthree_data' => array('type' => 'text', 'not null' => FALSE),
+  );
+  $indexes = array();
+  return array(
+    'columns' => $columns,
+    'indexes' => $indexes,
+  );
+}
