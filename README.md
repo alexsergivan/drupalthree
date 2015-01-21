@@ -1,2 +1,2 @@
 # drupalthree
-Three,js field for Drupal 7
+Three.js field for Drupal 7
